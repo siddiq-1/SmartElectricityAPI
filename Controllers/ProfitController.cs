@@ -2,10 +2,13 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Internal;
 using SmartElectricityAPI.Database;
 using SmartElectricityAPI.Interfaces;
 using SmartElectricityAPI.Models;
 using System;
+using System.ComponentModel.Design;
+using System.Security.Claims;
 
 namespace SmartElectricityAPI.Controllers
 {
@@ -25,47 +28,10 @@ namespace SmartElectricityAPI.Controllers
         [HttpGet("{year}"), Authorize]
         public async Task<ActionResult> GetCompanyProfit(int year)
         {
-            //if (_userInfo.SelectedCompanyId != 0)
-            //{
-            //    var companyProfit = await _dbContext.SofarStateHourly
-            //            .Where(x => x.CompanyId == _userInfo.SelectedCompanyId && x.Date.Value.Year == year)
-            //            .GroupBy(x => new { x.Date.Value.Year, x.Date.Value.Month })
-            //            .Select(g => new CompanyProfit
-            //            {
-            //                Month = g.Key.Month,
-            //                SumCostOfConsumpWithOutMygGid = g.Sum(x => x.CostOfConsumpWithOutMygGid),
-            //                SumCostPurchaseMinusSellFromGrid = g.Sum(x => x.CostPurchaseMinusSellFromGrid),
-            //                SumWinOrLoseFromMyGridUsage = g.Sum(x => x.WinOrLoseFromMyGridUsage)
-            //            })
-            //            .ToListAsync();
-
-            //    foreach (var item in companyProfit)
-            //    {
-            //        var lookupDate = new DateOnly(year, item.Month, 1);
-            //        var countryVatRange = await _dbContext.CountryVatRange
-            //        .Where(x => x.CountryId == _userInfo.SelectedCompanyId && lookupDate >= x.StartDate && lookupDate <= x.EndDate)
-            //        .FirstOrDefaultAsync();
-
-            //        if (countryVatRange != null)
-            //        {
-            //            item.SumWinOrLoseFromMyGridUsage = item.SumWinOrLoseFromMyGridUsage * countryVatRange.VatRate;
-            //            item.SumCostOfConsumpWithOutMygGid = item.SumCostOfConsumpWithOutMygGid * countryVatRange.VatRate;
-            //            item.SumCostPurchaseMinusSellFromGrid = item.SumCostPurchaseMinusSellFromGrid * countryVatRange.VatRate;
-            //        }     
-            //    }
-                return Ok(await GetCompanyWithoutBatteryProfit(year));
-            //}
-
-            //return BadRequest();
-        }
-
-       [NonAction]
-        private async Task<List<CompanyProfit>> GetCompanyWithoutBatteryProfit(int year)
-        {
-            //if (_userInfo.SelectedCompanyId != 0)
-            //{
+            if (_userInfo.SelectedCompanyId != 0)
+            {
                 var companyProfit = await _dbContext.SofarStateHourly
-                        .Where(x => x.CompanyId == _userInfo.SelectedCompanyId && x.Date.Value.Year == year && (x.battery_power != 0 && x.battery_tempMax != 0 && x.battery_current != 0 && x.batterySOC != 0 && x.battery_tempMin != 0 && x.battery_voltage != 0))
+                        .Where(x => x.CompanyId == _userInfo.SelectedCompanyId && x.Date.Value.Year == year)
                         .GroupBy(x => new { x.Date.Value.Year, x.Date.Value.Month })
                         .Select(g => new CompanyProfit
                         {
@@ -91,10 +57,84 @@ namespace SmartElectricityAPI.Controllers
                     }
                 }
 
-                return companyProfit;
-            //}
+                return Ok(companyProfit);
+            }
+
+            return BadRequest();
         }
 
+
+        [HttpGet("v1/{year}"), Authorize]
+        public async Task<ActionResult> GetCompanyProfitByKwh(int year)
+        {
+            if (_userInfo.SelectedCompanyId != 0)
+            {
+
+                var companyProfit = await _dbContext.SofarStateHourly
+                                   .Include(x => x.Company)
+                                   .Where(x => x.Date.Value.Year == year)
+                                   .Join(_dbContext.InverterBattery,
+                                       s => s.RegisteredInverterId,
+                                       ib => ib.InverterId,
+                                       (s, ib) => new { s, ib })
+                                   .Where(x => x.ib.CapacityKWh > 0)
+                                   .GroupBy(x => new
+                                   {
+                                       x.s.Date.Value.Year,
+                                       x.s.Date.Value.Month,
+                                       x.s.Company.Name,
+                                       x.s.CompanyId,
+                                       x.ib.CapacityKWh
+                                   })
+                                   .Select(g => new CompanyProfitByKwh
+                                   {
+                                       Month = g.Key.Month,
+                                       CompanyId = g.Key.CompanyId.Value,
+                                       CompanyName = g.Key.Name,
+                                       Capacity = g.Key.CapacityKWh,
+                                       SumWinOrLoseFromMyGridUsage = g.Sum(x => x.s.WinOrLoseFromMyGridUsage)
+                                   })
+                                   .ToListAsync();
+
+                foreach (var item in companyProfit)
+                {
+                    var lookupDate = new DateOnly(year, item.Month, 1);
+                    var countryVatRange = await _dbContext.CountryVatRange
+                    .Where(x => x.CountryId == item.CompanyId && lookupDate >= x.StartDate && lookupDate <= x.EndDate)
+                    .FirstOrDefaultAsync();
+                    var isLoginUserFromCompany = false;
+                    if (item.CompanyId == _userInfo.SelectedCompanyId)
+                    {
+                        isLoginUserFromCompany = _dbContext.CompanyUsers.Where(x => x.CompanyId == item.CompanyId && x.UserId == _userInfo.Id).Any();
+                    }
+
+                    if (countryVatRange != null)
+                    {
+                        item.SumWinOrLoseFromMyGridUsage = item.SumWinOrLoseFromMyGridUsage * countryVatRange.VatRate;
+                        item.ProfitPerKwh = item.SumWinOrLoseFromMyGridUsage / item.Capacity;
+                    }
+                    if (!isLoginUserFromCompany)
+                    {
+                        item.CompanyName = $@"{item.CompanyName.First()}******{item.CompanyName.Last()}";
+                        item.IsLoggedInUser = false;
+                    }
+                    else
+                    {
+                        item.IsLoggedInUser = true;
+                    }
+                }
+                var result = companyProfit.OrderByDescending(x => x.ProfitPerKwh)
+                    .Select((x, index) => new
+                    {
+                        Position = index + 1,
+                        IsLoggedInUser = x.IsLoggedInUser,
+                        CompanyName = x.CompanyName,
+                        ProfitPerKwh = x.ProfitPerKwh
+                    });
+                return Ok(new { Top10Records = result.Take(10), LoggedInRecord = result.Where(x => x.IsLoggedInUser).FirstOrDefault() });
+            }
+            return BadRequest();
+        }
 
         [HttpGet("AvailableYears"), Authorize]
         public async Task<ActionResult> GetAvailableYears()
@@ -114,7 +154,7 @@ namespace SmartElectricityAPI.Controllers
                 else
                 {
                     return NotFound();
-                }                
+                }
             }
 
             return BadRequest();
