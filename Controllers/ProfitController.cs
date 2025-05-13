@@ -8,6 +8,7 @@ using SmartElectricityAPI.Interfaces;
 using SmartElectricityAPI.Models;
 using System;
 using System.ComponentModel.Design;
+using System.Linq;
 using System.Security.Claims;
 
 namespace SmartElectricityAPI.Controllers
@@ -69,91 +70,22 @@ namespace SmartElectricityAPI.Controllers
         {
             if (_userInfo.SelectedCompanyId != 0)
             {
-                var baseQuery = await _dbContext.SofarStateHourly
-                    .Include(x => x.Company)
-                    .Where(x => x.Date.Value.Year == year)
-                    .Join(_dbContext.InverterBattery,
-                          s => s.RegisteredInverterId,
-                          ib => ib.InverterId,
-                          (s, ib) => new { s, ib })
-                    .Where(x => x.ib.CapacityKWh > 0)
-                    .GroupBy(x => new
-                    {
-                        x.s.Date.Value.Year,
-                        x.s.Date.Value.Month,
-                        x.s.Company.Name,
-                        x.s.CompanyId,
-                        x.ib.CapacityKWh
-                    })
-                    .Select(g => new CompanyProfitByKwh
-                    {
-                        Month = g.Key.Month,
-                        CompanyId = g.Key.CompanyId.Value,
-                        CompanyName = g.Key.Name,
-                        Capacity = g.Key.CapacityKWh,
-                        SumWinOrLoseFromMyGridUsage = g.Sum(x => x.s.WinOrLoseFromMyGridUsage)
-                    })
-                    .ToListAsync();
+                var result = await _dbContext.CompanyProfitByKwh.FromSqlRaw("call GetCompanyVatImpact()").ToListAsync();
+                var currentCompanyName = await _dbContext.Company.FirstOrDefaultAsync(x => x.Id == _userInfo.SelectedCompanyId);
 
-                // Collect unique companies/months
-                var lookupDates = baseQuery.Select(x => new
+                foreach (var item in result)
                 {
-                    CompanyId = x.CompanyId,
-                    Date = new DateOnly(year, x.Month, 1)
-                }).Distinct().ToList();
-
-                var companyIds = baseQuery.Select(x => x.CompanyId).Distinct().ToList();
-
-                // Load all VATs in one query
-                var vatRanges = await _dbContext.CountryVatRange
-                    .Where(v => companyIds.Contains(v.CountryId))
-                    .ToListAsync();
-
-                // Load all company-user mappings in one go
-                var companyUsers = await _dbContext.CompanyUsers
-                    .Where(cu => companyIds.Contains(cu.CompanyId))
-                    .ToListAsync();
-
-                foreach (var item in baseQuery)
-                {
-                    var lookupDate = new DateOnly(year, item.Month, 1);
-
-                    var vat = vatRanges.FirstOrDefault(x =>
-                        x.CountryId == item.CompanyId &&
-                        lookupDate >= x.StartDate && lookupDate <= x.EndDate);
-
-                    var isLoginUserFromCompany = companyUsers
-                        .Any(x => x.CompanyId == item.CompanyId && x.UserId == _userInfo.Id);
-
-                    if (vat != null)
+                    if (currentCompanyName != null && item.CompanyName != currentCompanyName.Name)
                     {
-                        item.SumWinOrLoseFromMyGridUsage *= vat.VatRate;
-                        item.ProfitPerKwh = item.SumWinOrLoseFromMyGridUsage / item.Capacity;
-                    }
-
-                    item.IsLoggedInUser = isLoginUserFromCompany;
-
-                    if (!isLoginUserFromCompany)
-                    {
-                        item.CompanyName = $@"{item.CompanyName.First()}******{item.CompanyName.Last()}";
+                        item.CompanyName = $"{item.CompanyName.First()}*****{item.CompanyName.Last()}";
                     }
                 }
-
-                var result = baseQuery
-                    .OrderByDescending(x => x.ProfitPerKwh)
-                    .Select((x, index) => new
-                    {
-                        Position = index + 1,
-                        IsLoggedInUser = x.IsLoggedInUser,
-                        CompanyName = x.CompanyName,
-                        ProfitPerKwh = x.ProfitPerKwh
-                    })
-                    .ToList();
+                var loggedInResult = currentCompanyName != null ? result.FirstOrDefault(x => x.CompanyName == currentCompanyName.Name) : new CompanyProfitByKwh();
 
                 return Ok(new
                 {
                     Top10Records = result.Take(10),
-                    LoggedInRecord = result.FirstOrDefault(x => x.IsLoggedInUser)
+                    LoggedInRecord = loggedInResult
                 });
             }
 

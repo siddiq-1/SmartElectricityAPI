@@ -60,6 +60,7 @@ namespace SmartElectricityAPI.Database
         public DbSet<SwitchModel> SwitchModel { get; set; }
         public DbSet<SwitchModelParameters> SwitchModelParameters { get; set; }
         public DbSet<CountryVatRange> CountryVatRange { get; set; }
+        public DbSet<CompanyProfitByKwh> CompanyProfitByKwh { get; set; }
         
         public MySQLDBContext(DbContextOptions<MySQLDBContext> options)
 : base(options)
@@ -132,6 +133,7 @@ namespace SmartElectricityAPI.Database
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.Entity<CompanyProfitByKwh>().HasNoKey().ToView(null); // Not mapped to any table or view
             modelBuilder.Entity<User>()
                 .HasOne(u => u.Company)
                 .WithOne()

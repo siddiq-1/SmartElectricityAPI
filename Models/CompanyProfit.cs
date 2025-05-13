@@ -11,13 +11,8 @@ namespace SmartElectricityAPI.Models
     }
     public class CompanyProfitByKwh
     {
-        public int Rank { get; set; }
-        public int Month { get; set; }
-        public int CompanyId { get; set; }
+        public int Position { get; set; }
         public string CompanyName { get; set; }
-        public double Capacity { get; set; }
-        public double SumWinOrLoseFromMyGridUsage { get; set; }
-        public double ProfitPerKwh { get; set; } = 0.0d;
-        public bool IsLoggedInUser { get; set; }
+        public double ProfitByKWh { get; set; } = 0.0d;
     }
 }
