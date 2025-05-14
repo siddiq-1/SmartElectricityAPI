@@ -3,11 +3,13 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Internal;
+using MySqlConnector;
 using SmartElectricityAPI.Database;
 using SmartElectricityAPI.Interfaces;
 using SmartElectricityAPI.Models;
 using System;
 using System.ComponentModel.Design;
+using System.Data.SqlClient;
 using System.Linq;
 using System.Security.Claims;
 
@@ -70,7 +72,8 @@ namespace SmartElectricityAPI.Controllers
         {
             if (_userInfo.SelectedCompanyId != 0)
             {
-                var result = await _dbContext.CompanyProfitByKwh.FromSqlRaw("call GetCompanyVatImpact()").ToListAsync();
+                var yearParam = new MySqlParameter("inputYear", MySqlDbType.Int32) { Value = year };
+                var result = await _dbContext.CompanyProfitByKwh.FromSqlRaw("call GetCompanyVatImpact(@inputYear)", yearParam).ToListAsync();
                 var currentCompanyName = await _dbContext.Company.FirstOrDefaultAsync(x => x.Id == _userInfo.SelectedCompanyId);
 
                 foreach (var item in result)

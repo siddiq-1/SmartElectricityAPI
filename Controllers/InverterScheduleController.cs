@@ -114,8 +114,8 @@ public class InverterScheduleController : ControllerBase
     [HttpGet, Route("TotalSolarValue")]
     public async Task<ActionResult> GetTotalSolarValue(int inverterId , DateTime fromDate, DateTime toDate)
     {
-        var result = await _dbContext.WeatherForecastData.Where(x => x.InverterId == inverterId && x.DateTime.Date >= fromDate.Date && x.DateTime.Date <= toDate.Date).SumAsync(x => x.EstimatedSolarPower) ;
-        return Ok(Math.Round(1000 != 0 ? (double)((double)result / 1000) : 0.0, 2));
+        var result = Convert.ToDouble(await _dbContext.WeatherForecastData.Where(x => x.InverterId == inverterId && x.DateTime.Date >= fromDate.Date && x.DateTime.Date <= toDate.Date).SumAsync(x => x.EstimatedSolarPower));
+        return Ok(Math.Round(result > 0.0d ? (result / 1000.00) : 0.0, 2));
     }
 
     [HttpGet,Route("InverterMaxDate"), Authorize]
